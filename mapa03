@@ -72,6 +72,7 @@ html, body {
   color: #fff;
   z-index: 10;
   transition: transform 0.4s ease;
+  text-align: center;        /* CENTRADO DEL PANEL */
 }
 
 .label {
@@ -84,9 +85,24 @@ html, body {
   font-weight: bold;
   margin-bottom: 10px;
 }
+
 .coords {
   display: flex;
   gap: 16px;
+  justify-content: center;   /* CENTRADO DE LAS DOS COLUMNAS */
+}
+.coords > div {
+  text-align: center;        /* CENTRADO DE CADA COLUMNA */
+}
+
+/* Texto de crédito (debajo del panel) */
+.devline {
+  margin-top: 10px;
+  font-size: 16px;           /* apenas menor que 18px */
+  color: rgba(255,255,255,0.75);
+  line-height: 1.25;
+  overflow-wrap: anywhere;   /* evita que el email “desborde” */
+  word-break: break-word;
 }
 
 /* Posiciones del panel */
@@ -130,6 +146,9 @@ body.is-mobile #info-panel {
         <div id="lon-val" class="value">0.00°</div>
       </div>
     </div>
+
+    <!-- Línea de crédito (texto generado desde Base64) -->
+    <div id="dev-line" class="devline"></div>
   </div>
 </div>
 
@@ -142,6 +161,9 @@ const panel = document.getElementById("info-panel");
 const countryText = document.getElementById("country-name");
 const latText = document.getElementById("lat-val");
 const lonText = document.getElementById("lon-val");
+
+/* Créditos (se muestran en el panel, pero NO están en claro en el HTML) */
+const devLine = document.getElementById("dev-line");
 
 const positions = ["pos-tl","pos-tr","pos-br","pos-bl"];
 let posIdx = 1;
@@ -156,6 +178,14 @@ const isMobile =
 if (isMobile) document.body.classList.add("is-mobile");
 
 /* =====================================================
+   CRÉDITO (BASE64 → TEXTO EN PANTALLA)
+   ===================================================== */
+const DEV_NAME_B64 = "TWFydGluY2hlbmtv";
+const DEV_EMAIL_B64 = "bWFydGluYWxlamFuZHJvdmVyYUBnbWFpbC5jb20=";
+
+devLine.textContent = `Desarrollado por ${atob(DEV_NAME_B64)} — ${atob(DEV_EMAIL_B64)}`;
+
+/* =====================================================
    PANEL MOVE (IGUAL QUE ANTES)
    ===================================================== */
 function movePanel() {
@@ -168,10 +198,13 @@ function movePanel() {
 }
 
 /* =====================================================
+   DATA POLÍTICA (para geoContains)
+   ===================================================== */
+let countriesData = null;
+
+/* =====================================================
    UPDATE UI — REFERENCIA: JPG
    ===================================================== */
-let countriesData; /* GeoJSON features con properties.name */
-
 function updateUI(clientX, clientY) {
   const rect = mapImg.getBoundingClientRect();
   const x = clientX - rect.left;
@@ -188,7 +221,6 @@ function updateUI(clientX, clientY) {
   latText.textContent = lat.toFixed(4);
   lonText.textContent = lon.toFixed(4);
 
-  /* Nombre del país (solo si ya cargó el dataset) */
   if (countriesData) {
     const match = countriesData.features.find(f => d3.geoContains(f, [lon, lat]));
     countryText.textContent = match
@@ -233,7 +265,7 @@ if (!isMobile) {
 }
 
 /* =====================================================
-   FRONTERAS VECTORIALES (SOLO DIBUJO) + DATA NOMBRES
+   FRONTERAS VECTORIALES (SOLO DIBUJO) + CARGA DATA
    ===================================================== */
 const svg = d3.select("#borders-svg");
 
@@ -261,11 +293,12 @@ const path = d3.geoPath().projection({
 
 d3.json("https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json")
   .then(world => {
-    /* GeoJSON para nombres + hit-test */
     countriesData = topojson.feature(world, world.objects.countries);
+    countryText.textContent = "LISTO";
 
-    /* Dibujo de fronteras (mismas features) */
-    svg.attr("width", "100%").attr("height", "100%");
+    svg
+      .attr("width", "100%")
+      .attr("height", "100%");
 
     svg.selectAll("path")
       .data(countriesData.features)
@@ -273,12 +306,10 @@ d3.json("https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json")
       .append("path")
       .attr("class", "border")
       .attr("d", path);
-
-    countryText.textContent = "LISTO";
   })
   .catch(err => {
     console.error(err);
-    countryText.textContent = "ERROR CARGANDO DATOS";
+    countryText.textContent = "ERROR DATOS";
   });
 
 window.addEventListener("resize", () => {
