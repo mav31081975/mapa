@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>Geo-Explorer Hybrid Stable v3</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="https://unpkg.com/topojson@3"></script>
+    <style>
+        :root {
+            --bg-blur: rgba(15, 15, 15, 0.8);
+            --accent: #00ffcc;
+            --panel-width: 320px;
+        }
+
+        body, html {
+            margin: 0; padding: 0; width: 100%; 
+            /* Uso de dvh para asegurar que el mapa ocupe el área visible real en Android */
+            height: 100dvh; 
+            overflow: hidden; background: #000;
+            font-family: 'Courier New', Courier, monospace;
+            overscroll-behavior: none;
+        }
+
+        #map-container {
+            width: 100vw; 
+            height: 100dvh;
+            position: relative; 
+            touch-action: none;
+            cursor: crosshair;
+        }
+
+        #world-map {
+            width: 100%; 
+            height: 100%;
+            /* "fill" obliga a ver todo el mapa (aunque distorsione) dentro del área visible */
+            object-fit: fill; 
+            pointer-events: none;
+            display: block;
+        }
+
+        /* --- ESTILO BASE (PC - INTACTO) --- */
+        #info-panel {
+            position: absolute;
+            width: var(--panel-width);
+            padding: 20px;
+            background: var(--bg-blur);
+            backdrop-filter: blur(15px);
+            -webkit-backdrop-filter: blur(15px);
+            border: 1px solid rgba(0, 255, 204, 0.3);
+            border-radius: 4px;
+            color: #fff;
+            z-index: 1000;
+            transition: transform 0.4s cubic-bezier(0.2, 0.8, 0.2, 1);
+            pointer-events: auto;
+            will-change: transform, top, left;
+        }
+
+        .label { color: var(--accent); font-size: 10px; letter-spacing: 2px; margin-bottom: 5px; }
+        .value { font-size: 18px; font-weight: bold; margin-bottom: 15px; }
+        .coords { display: flex; gap: 20px; }
+        .coords div { flex: 1; }
+
+        /* --- ESTILO ANDROID (BIFURCACIÓN VISUAL) --- */
+        /* Redimensionado al 75% del original (240px), un 50% más que el anterior */
+        body.is-mobile #info-panel {
+            width: 240px; 
+            padding: 14px;
+            border-radius: 3px;
+        }
+        body.is-mobile .label { font-size: 8px; margin-bottom: 3px; }
+        body.is-mobile .value { font-size: 14px; margin-bottom: 10px; }
+        body.is-mobile .coords { gap: 12px; }
+
+        /* Posiciones */
+        .pos-tl { top: 15px; left: 15px; }
+        .pos-tr { top: 15px; left: calc(100% - var(--panel-width) - 35px); }
+        .pos-bl { top: calc(100% - 170px); left: 15px; }
+        .pos-br { top: calc(100% - 170px); left: calc(100% - var(--panel-width) - 35px); }
+
+        /* Posiciones adaptadas para el panel de 240px en móvil */
+        body.is-mobile .pos-tr { left: calc(100% - 240px - 25px); }
+        body.is-mobile .pos-bl { top: calc(100% - 120px); }
+        body.is-mobile .pos-br { top: calc(100% - 120px); left: calc(100% - 240px - 25px); }
+
+        #vignette {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            box-shadow: inset 0 0 80px #000; pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="map-container">
+        <img id="world-map" src="https://upload.wikimedia.org/wikipedia/commons/8/83/Equirectangular_projection_SW.jpg" alt="Map">
+        <div id="vignette"></div>
+
+        <div id="info-panel" class="pos-tr">
+            <div class="label">UBICACIÓN POLÍTICA</div>
+            <div id="country-name" class="value">CARGANDO...</div>
+            <div class="coords">
+                <div>
+                    <div class="label">LATITUD</div>
+                    <div id="lat-val" class="value">0.00°</div>
+                </div>
+                <div>
+                    <div class="label">LONGITUD</div>
+                    <div id="lon-val" class="value">0.00°</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const panel = document.getElementById('info-panel');
+        const mapImg = document.getElementById('world-map');
+        const countryText = document.getElementById('country-name');
+        const latText = document.getElementById('lat-val');
+        const lonText = document.getElementById('lon-val');
+
+        let countriesData;
+        let positions = ['pos-tl', 'pos-tr', 'pos-br', 'pos-bl'];
+        let currentPosIdx = 1;
+        let ticking = false;
+        let jumping = false;
+
+        const isMobile = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+        if (isMobile) document.body.classList.add('is-mobile');
+
+        d3.json("https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json").then(data => {
+            countriesData = topojson.feature(data, data.objects.countries);
+            countryText.innerText = "LISTO";
+        });
+
+        const movePanel = () => {
+            if (jumping) return;
+            jumping = true;
+            panel.classList.remove(positions[currentPosIdx]);
+            currentPosIdx = (currentPosIdx + 1) % positions.length;
+            panel.classList.add(positions[currentPosIdx]);
+            setTimeout(() => { jumping = false; }, 400);
+        };
+
+        function updateUI(clientX, clientY) {
+            const rect = mapImg.getBoundingClientRect();
+            const x = clientX - rect.left;
+            const y = clientY - rect.top;
+
+            // Mapeo preciso
+            const lon = (x / rect.width) * 360 - 180;
+            const lat = 90 - (y / rect.height) * 180;
+
+            latText.innerText = lat.toFixed(4);
+            lonText.innerText = lon.toFixed(4);
+
+            if (countriesData) {
+                const match = countriesData.features.find(f => d3.geoContains(f, [lon, lat]));
+                countryText.innerText = match ? match.properties.name.toUpperCase() : "OCÉANO";
+            }
+
+            // Hit Test solo para Android
+            if (isMobile && !jumping) {
+                const pRect = panel.getBoundingClientRect();
+                const margin = 5;
+                if (clientX >= pRect.left - margin && clientX <= pRect.right + margin && 
+                    clientY >= pRect.top - margin && clientY <= pRect.bottom + margin) {
+                    movePanel();
+                }
+            }
+            ticking = false;
+        }
+
+        // --- BIFURCACIÓN DE EVENTOS ---
+        if (!isMobile) {
+            /* BLOQUE PC INTACTO */
+            window.addEventListener('pointermove', (e) => {
+                if (!ticking) {
+                    requestAnimationFrame(() => updateUI(e.clientX, e.clientY));
+                    ticking = true;
+                }
+            });
+            panel.addEventListener('mouseenter', movePanel);
+        } else {
+            /* BLOQUE ANDROID POTENCIADO */
+            window.addEventListener('touchmove', (e) => {
+                const touch = e.touches[0];
+                if (!ticking) {
+                    requestAnimationFrame(() => updateUI(touch.clientX, touch.clientY));
+                    ticking = true;
+                }
+            }, { passive: false });
+
+            panel.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                movePanel();
+            }, { passive: false });
+        }
+
+        // Re-ajuste en rotación para evitar cortes
+        window.addEventListener('orientationchange', () => {
+            setTimeout(() => window.scrollTo(0,0), 100);
+        });
+
+    </script>
+</body>
+</html>
