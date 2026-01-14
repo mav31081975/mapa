@@ -1,206 +1,288 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>Geo-Explorer Hybrid Stable v3</title>
-    <script src="https://d3js.org/d3.v7.min.js"></script>
-    <script src="https://unpkg.com/topojson@3"></script>
-    <style>
-        :root {
-            --bg-blur: rgba(15, 15, 15, 0.8);
-            --accent: #00ffcc;
-            --panel-width: 320px;
-        }
+<meta charset="UTF-8">
 
-        body, html {
-            margin: 0; padding: 0; width: 100%; 
-            /* Uso de dvh para asegurar que el mapa ocupe el área visible real en Android */
-            height: 100dvh; 
-            overflow: hidden; background: #000;
-            font-family: 'Courier New', Courier, monospace;
-            overscroll-behavior: none;
-        }
+<!-- Viewport “duro” para que en mobile no haga zoom ni recortes raros -->
+<meta name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0,
+               user-scalable=no, viewport-fit=cover">
 
-        #map-container {
-            width: 100vw; 
-            height: 100dvh;
-            position: relative; 
-            touch-action: none;
-            cursor: crosshair;
-        }
+<title>Geo-Explorer • JPG + Fronteras (Opción A Estable)</title>
 
-        #world-map {
-            width: 100%; 
-            height: 100%;
-            /* "fill" obliga a ver todo el mapa (aunque distorsione) dentro del área visible */
-            object-fit: fill; 
-            pointer-events: none;
-            display: block;
-        }
+<!-- D3 + TopoJSON SOLO para dibujar fronteras -->
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<script src="https://unpkg.com/topojson@3"></script>
 
-        /* --- ESTILO BASE (PC - INTACTO) --- */
-        #info-panel {
-            position: absolute;
-            width: var(--panel-width);
-            padding: 20px;
-            background: var(--bg-blur);
-            backdrop-filter: blur(15px);
-            -webkit-backdrop-filter: blur(15px);
-            border: 1px solid rgba(0, 255, 204, 0.3);
-            border-radius: 4px;
-            color: #fff;
-            z-index: 1000;
-            transition: transform 0.4s cubic-bezier(0.2, 0.8, 0.2, 1);
-            pointer-events: auto;
-            will-change: transform, top, left;
-        }
+<style>
+:root {
+  --accent: #00ffcc; /* color “HUD” */
+}
 
-        .label { color: var(--accent); font-size: 10px; letter-spacing: 2px; margin-bottom: 5px; }
-        .value { font-size: 18px; font-weight: bold; margin-bottom: 15px; }
-        .coords { display: flex; gap: 20px; }
-        .coords div { flex: 1; }
+/* ================= BASE ================= */
+html, body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100dvh;          /* alto real visible (Android moderno) */
+  overflow: hidden;
+  background: #000;
+  font-family: monospace;
+}
 
-        /* --- ESTILO ANDROID (BIFURCACIÓN VISUAL) --- */
-        /* Redimensionado al 75% del original (240px), un 50% más que el anterior */
-        body.is-mobile #info-panel {
-            width: 240px; 
-            padding: 14px;
-            border-radius: 3px;
-        }
-        body.is-mobile .label { font-size: 8px; margin-bottom: 3px; }
-        body.is-mobile .value { font-size: 14px; margin-bottom: 10px; }
-        body.is-mobile .coords { gap: 12px; }
+#map-container {
+  position: relative;      /* permite superponer SVG y panel */
+  width: 100vw;
+  height: 100dvh;
+  touch-action: none;      /* evita gestos del navegador */
+  cursor: crosshair;
+}
 
-        /* Posiciones */
-        .pos-tl { top: 15px; left: 15px; }
-        .pos-tr { top: 15px; left: calc(100% - var(--panel-width) - 35px); }
-        .pos-bl { top: calc(100% - 170px); left: 15px; }
-        .pos-br { top: calc(100% - 170px); left: calc(100% - var(--panel-width) - 35px); }
+/* ================= MAPA JPG (REFERENCIA REAL) ================= */
+#world-map {
+  width: 100%;
+  height: 100%;
+  object-fit: fill;        /* CRÍTICO: estira X/Y y coincide con el cálculo lat/lon */
+  display: block;
+}
 
-        /* Posiciones adaptadas para el panel de 240px en móvil */
-        body.is-mobile .pos-tr { left: calc(100% - 240px - 25px); }
-        body.is-mobile .pos-bl { top: calc(100% - 120px); }
-        body.is-mobile .pos-br { top: calc(100% - 120px); left: calc(100% - 240px - 25px); }
+/* ================= SVG SUPERPUESTO (VISUAL ONLY) ================= */
+#borders-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;    /* NO interfiere con mouse/touch */
+  z-index: 2;              /* por encima del JPG */
+}
 
-        #vignette {
-            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-            box-shadow: inset 0 0 80px #000; pointer-events: none;
-        }
-    </style>
+/* Fronteras (solo línea) */
+.border {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.65); /* blanco contrastante */
+  stroke-width: 1.2px;
+  vector-effect: non-scaling-stroke; /* mantiene grosor al escalar */
+}
+
+/* ================= PANEL ================= */
+#info-panel {
+  position: absolute;
+  width: 320px;
+  padding: 16px;
+  background: rgba(15,15,15,0.8);
+  border: 1px solid rgba(0,255,204,0.4);
+  color: #fff;
+  z-index: 10;             /* por encima de todo */
+  transition: transform 0.4s ease;
+}
+
+.label {
+  font-size: 10px;
+  letter-spacing: 2px;
+  color: var(--accent);
+}
+.value {
+  font-size: 18px;
+  font-weight: bold;
+  margin-bottom: 10px;
+}
+.coords {
+  display: flex;
+  gap: 16px;
+}
+
+/* Posiciones del panel (salta por esquinas) */
+.pos-tl { top: 15px; left: 15px; }
+.pos-tr { top: 15px; left: calc(100% - 355px); }
+.pos-bl { top: calc(100% - 150px); left: 15px; }
+.pos-br { top: calc(100% - 150px); left: calc(100% - 355px); }
+
+/* Mobile: panel un poco más chico */
+body.is-mobile #info-panel {
+  width: 240px;
+}
+</style>
 </head>
+
 <body>
 
-    <div id="map-container">
-        <img id="world-map" src="https://upload.wikimedia.org/wikipedia/commons/8/83/Equirectangular_projection_SW.jpg" alt="Map">
-        <div id="vignette"></div>
+<div id="map-container">
 
-        <div id="info-panel" class="pos-tr">
-            <div class="label">UBICACIÓN POLÍTICA</div>
-            <div id="country-name" class="value">CARGANDO...</div>
-            <div class="coords">
-                <div>
-                    <div class="label">LATITUD</div>
-                    <div id="lat-val" class="value">0.00°</div>
-                </div>
-                <div>
-                    <div class="label">LONGITUD</div>
-                    <div id="lon-val" class="value">0.00°</div>
-                </div>
-            </div>
-        </div>
+  <!-- MAPA JPG (BASE) -->
+  <img
+    id="world-map"
+    src="https://upload.wikimedia.org/wikipedia/commons/8/83/Equirectangular_projection_SW.jpg"
+    alt="Mapa mundial">
+
+  <!-- SVG DE FRONTERAS (SOLO VISUAL) -->
+  <svg id="borders-svg"></svg>
+
+  <!-- PANEL -->
+  <div id="info-panel" class="pos-tr">
+    <div class="label">UBICACIÓN POLÍTICA</div>
+    <div id="country-name" class="value">CARGANDO…</div>
+
+    <div class="coords">
+      <div>
+        <div class="label">LATITUD</div>
+        <div id="lat-val" class="value">0.00°</div>
+      </div>
+      <div>
+        <div class="label">LONGITUD</div>
+        <div id="lon-val" class="value">0.00°</div>
+      </div>
     </div>
+  </div>
+</div>
 
-    <script>
-        const panel = document.getElementById('info-panel');
-        const mapImg = document.getElementById('world-map');
-        const countryText = document.getElementById('country-name');
-        const latText = document.getElementById('lat-val');
-        const lonText = document.getElementById('lon-val');
+<script>
+/* =====================================================
+   REFERENCIAS (TU LÓGICA ORIGINAL)
+   ===================================================== */
+const mapImg = document.getElementById("world-map");
+const panel = document.getElementById("info-panel");
+const countryText = document.getElementById("country-name");
+const latText = document.getElementById("lat-val");
+const lonText = document.getElementById("lon-val");
 
-        let countriesData;
-        let positions = ['pos-tl', 'pos-tr', 'pos-br', 'pos-bl'];
-        let currentPosIdx = 1;
-        let ticking = false;
-        let jumping = false;
+const positions = ["pos-tl","pos-tr","pos-br","pos-bl"]; // ciclo de posiciones
+let posIdx = 1;                                          // arranca en TR
+let jumping = false;                                     // evita saltos seguidos
+let ticking = false;                                     // throttle con rAF
 
-        const isMobile = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
-        if (isMobile) document.body.classList.add('is-mobile');
+/* ================= MOBILE DETECTION ================= */
+const isMobile =
+  ("ontouchstart" in window) ||
+  (navigator.maxTouchPoints > 0);
 
-        d3.json("https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json").then(data => {
-            countriesData = topojson.feature(data, data.objects.countries);
-            countryText.innerText = "LISTO";
-        });
+if (isMobile) document.body.classList.add("is-mobile");
 
-        const movePanel = () => {
-            if (jumping) return;
-            jumping = true;
-            panel.classList.remove(positions[currentPosIdx]);
-            currentPosIdx = (currentPosIdx + 1) % positions.length;
-            panel.classList.add(positions[currentPosIdx]);
-            setTimeout(() => { jumping = false; }, 400);
-        };
+/* =====================================================
+   PANEL MOVE (IGUAL QUE ANTES)
+   ===================================================== */
+function movePanel() {
+  if (jumping) return;
+  jumping = true;
+  panel.classList.remove(positions[posIdx]);
+  posIdx = (posIdx + 1) % positions.length;
+  panel.classList.add(positions[posIdx]);
+  setTimeout(() => jumping = false, 400);
+}
 
-        function updateUI(clientX, clientY) {
-            const rect = mapImg.getBoundingClientRect();
-            const x = clientX - rect.left;
-            const y = clientY - rect.top;
+/* =====================================================
+   UPDATE UI — REFERENCIA: JPG
+   ===================================================== */
+function updateUI(clientX, clientY) {
+  const rect = mapImg.getBoundingClientRect();
+  const x = clientX - rect.left;
+  const y = clientY - rect.top;
 
-            // Mapeo preciso
-            const lon = (x / rect.width) * 360 - 180;
-            const lat = 90 - (y / rect.height) * 180;
+  // si estoy fuera del mapa, no actualizo nada
+  if (x < 0 || y < 0 || x > rect.width || y > rect.height) {
+    ticking = false;
+    return;
+  }
 
-            latText.innerText = lat.toFixed(4);
-            lonText.innerText = lon.toFixed(4);
+  // conversión lineal equirectangular (coincide con object-fit: fill)
+  const lon = (x / rect.width) * 360 - 180;
+  const lat = 90 - (y / rect.height) * 180;
 
-            if (countriesData) {
-                const match = countriesData.features.find(f => d3.geoContains(f, [lon, lat]));
-                countryText.innerText = match ? match.properties.name.toUpperCase() : "OCÉANO";
-            }
+  latText.textContent = lat.toFixed(4);
+  lonText.textContent = lon.toFixed(4);
 
-            // Hit Test solo para Android
-            if (isMobile && !jumping) {
-                const pRect = panel.getBoundingClientRect();
-                const margin = 5;
-                if (clientX >= pRect.left - margin && clientX <= pRect.right + margin && 
-                    clientY >= pRect.top - margin && clientY <= pRect.bottom + margin) {
-                    movePanel();
-                }
-            }
-            ticking = false;
-        }
+  ticking = false;
+}
 
-        // --- BIFURCACIÓN DE EVENTOS ---
-        if (!isMobile) {
-            /* BLOQUE PC INTACTO */
-            window.addEventListener('pointermove', (e) => {
-                if (!ticking) {
-                    requestAnimationFrame(() => updateUI(e.clientX, e.clientY));
-                    ticking = true;
-                }
-            });
-            panel.addEventListener('mouseenter', movePanel);
-        } else {
-            /* BLOQUE ANDROID POTENCIADO */
-            window.addEventListener('touchmove', (e) => {
-                const touch = e.touches[0];
-                if (!ticking) {
-                    requestAnimationFrame(() => updateUI(touch.clientX, touch.clientY));
-                    ticking = true;
-                }
-            }, { passive: false });
+/* =====================================================
+   EVENTOS (IGUALES A TU BASE)
+   ===================================================== */
+if (!isMobile) {
+  // PC: uso pointermove + rAF para no saturar
+  window.addEventListener("pointermove", e => {
+    if (!ticking) {
+      requestAnimationFrame(() => updateUI(e.clientX, e.clientY));
+      ticking = true;
+    }
+  });
+  // al pasar por arriba del panel, lo corro
+  panel.addEventListener("mouseenter", movePanel);
+} else {
+  // Android: uso touchmove directo (y corro panel si el dedo lo toca)
+  window.addEventListener("touchmove", e => {
+    const t = e.touches[0];
+    updateUI(t.clientX, t.clientY);
 
-            panel.addEventListener('touchstart', (e) => {
-                e.preventDefault();
-                movePanel();
-            }, { passive: false });
-        }
+    const r = panel.getBoundingClientRect();
+    if (
+      t.clientX >= r.left &&
+      t.clientX <= r.right &&
+      t.clientY >= r.top &&
+      t.clientY <= r.bottom
+    ) {
+      movePanel();
+    }
+  }, { passive:false });
 
-        // Re-ajuste en rotación para evitar cortes
-        window.addEventListener('orientationchange', () => {
-            setTimeout(() => window.scrollTo(0,0), 100);
-        });
+  // tap al panel = lo mueve
+  panel.addEventListener("touchstart", e => {
+    e.preventDefault();
+    movePanel();
+  }, { passive:false });
+}
 
-    </script>
+/* =====================================================
+   FRONTERAS VECTORIALES (SOLO DIBUJO)
+   ===================================================== */
+const svg = d3.select("#borders-svg");
+
+// proyección lineal a pixeles (misma lógica que lon/lat del JPG)
+function project([lon, lat]) {
+  const w = svg.node().clientWidth;
+  const h = svg.node().clientHeight;
+  return [
+    (lon + 180) / 360 * w,
+    (90 - lat) / 180 * h
+  ];
+}
+
+// path custom: transforma lon/lat a pixeles “estirados” como el JPG
+const path = d3.geoPath().projection({
+  stream: stream => ({
+    point(lon, lat) {
+      const [x, y] = project([lon, lat]);
+      stream.point(x, y);
+    },
+    lineStart: () => stream.lineStart(),
+    lineEnd: () => stream.lineEnd(),
+    polygonStart: () => stream.polygonStart(),
+    polygonEnd: () => stream.polygonEnd()
+  })
+});
+
+// carga de dataset y dibujo de paths una sola vez
+d3.json("https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json")
+  .then(world => {
+    const features = topojson
+      .feature(world, world.objects.countries)
+      .features;
+
+    svg
+      .attr("width", "100%")
+      .attr("height", "100%");
+
+    svg.selectAll("path")
+      .data(features)
+      .enter()
+      .append("path")
+      .attr("class", "border")
+      .attr("d", path);
+  });
+
+// si cambia el tamaño, recalculo el "d" con el nuevo width/height
+window.addEventListener("resize", () => {
+  svg.selectAll("path").attr("d", path);
+});
+</script>
+
 </body>
 </html>
