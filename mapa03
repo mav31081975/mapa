@@ -50,16 +50,20 @@ html, body {
   inset: 0;
   width: 100%;
   height: 100%;
-  pointer-events: none;      /* NO INTERFIERE */
   z-index: 2;
 }
 
 /* Fronteras */
 .border {
-  fill: none;
-  stroke: rgba(255, 255, 255, 0.65); /* blanco contrastante */
+  fill: rgba(0,0,0,0);       /* transparente por defecto */
+  stroke: rgba(255, 255, 255, 0.65);
   stroke-width: 1.2px;
   vector-effect: non-scaling-stroke;
+}
+
+/* Hover país (solo el país bajo el mouse) */
+.border.is-hover {
+  fill: rgba(255, 230, 0, 0.35);  /* AMARILLO más contrastante */
 }
 
 /* ================= PANEL ================= */
@@ -72,7 +76,7 @@ html, body {
   color: #fff;
   z-index: 10;
   transition: transform 0.4s ease;
-  text-align: center;        /* CENTRADO DEL PANEL */
+  text-align: center;
 }
 
 .label {
@@ -89,19 +93,19 @@ html, body {
 .coords {
   display: flex;
   gap: 16px;
-  justify-content: center;   /* CENTRADO DE LAS DOS COLUMNAS */
+  justify-content: center;
 }
 .coords > div {
-  text-align: center;        /* CENTRADO DE CADA COLUMNA */
+  text-align: center;
 }
 
 /* Texto de crédito (debajo del panel) */
 .devline {
   margin-top: 10px;
-  font-size: 16px;           /* apenas menor que 18px */
+  font-size: 16px;
   color: rgba(255,255,255,0.75);
   line-height: 1.25;
-  overflow-wrap: anywhere;   /* evita que el email “desborde” */
+  overflow-wrap: anywhere;
   word-break: break-word;
 }
 
@@ -265,7 +269,7 @@ if (!isMobile) {
 }
 
 /* =====================================================
-   FRONTERAS VECTORIALES (SOLO DIBUJO) + CARGA DATA
+   FRONTERAS VECTORIALES (DIBUJO + HOVER)
    ===================================================== */
 const svg = d3.select("#borders-svg");
 
@@ -291,6 +295,50 @@ const path = d3.geoPath().projection({
   })
 });
 
+let hoveredPath = null;
+
+/* Convierte pantalla→lon/lat usando el MISMO mapeo del JPG */
+function screenToLonLat(clientX, clientY) {
+  const rect = mapImg.getBoundingClientRect();
+  const x = clientX - rect.left;
+  const y = clientY - rect.top;
+
+  if (x < 0 || y < 0 || x > rect.width || y > rect.height) return null;
+
+  const lon = (x / rect.width) * 360 - 180;
+  const lat = 90 - (y / rect.height) * 180;
+  return [lon, lat];
+}
+
+function clearHover() {
+  if (hoveredPath) {
+    hoveredPath.classList.remove("is-hover");
+    hoveredPath = null;
+  }
+}
+
+/* Hover: colorea solo el país (el mar no) */
+svg.on("pointermove", (event) => {
+  if (!countriesData) return;
+
+  const ll = screenToLonLat(event.clientX, event.clientY);
+  if (!ll) { clearHover(); return; }
+
+  const [lon, lat] = ll;
+
+  const match = countriesData.features.find(f => d3.geoContains(f, [lon, lat]));
+  if (!match) { clearHover(); return; }
+
+  const el = match.__pathEl;
+  if (!el) { clearHover(); return; }
+
+  if (hoveredPath && hoveredPath !== el) hoveredPath.classList.remove("is-hover");
+  hoveredPath = el;
+  hoveredPath.classList.add("is-hover");
+});
+
+svg.on("pointerleave", () => clearHover());
+
 d3.json("https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json")
   .then(world => {
     countriesData = topojson.feature(world, world.objects.countries);
@@ -300,12 +348,16 @@ d3.json("https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json")
       .attr("width", "100%")
       .attr("height", "100%");
 
-    svg.selectAll("path")
+    const paths = svg.selectAll("path")
       .data(countriesData.features)
       .enter()
       .append("path")
       .attr("class", "border")
-      .attr("d", path);
+      .attr("d", path)
+      .style("pointer-events", "all");
+
+    /* vínculo feature → elemento DOM para hover rápido */
+    paths.each(function(d) { d.__pathEl = this; });
   })
   .catch(err => {
     console.error(err);
@@ -314,8 +366,10 @@ d3.json("https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json")
 
 window.addEventListener("resize", () => {
   svg.selectAll("path").attr("d", path);
+  clearHover();
 });
 </script>
 
 </body>
 </html>
+
